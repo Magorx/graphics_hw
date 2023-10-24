@@ -14,13 +14,32 @@
 class SimpleCompute : public ICompute
 {
 public:
+  const int WORKGROUPS = 256;
+
   SimpleCompute(uint32_t a_length);
   ~SimpleCompute()  { Cleanup(); };
 
   inline VkInstance   GetVkInstance() const override { return m_instance; }
   void InitVulkan(const char** a_instanceExtensions, uint32_t a_instanceExtensionsCount, uint32_t a_deviceId) override;
 
+  void Setup(int workgroups);
   void Execute() override;
+
+  inline void FillData(const std::vector<float> &data)
+  {
+    m_pCopyHelper->UpdateBuffer(m_data, 0, data.data(), sizeof(float) * data.size());
+  }
+
+  inline float GetResults() {
+    std::vector<float> output(WORKGROUPS);
+    m_pCopyHelper->ReadBuffer(m_output, 0, output.data(), sizeof(float) * output.size());
+
+    float ret = 0;
+    for (float partial_sum : output) {
+      ret += partial_sum;
+    }
+    return ret;
+  }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -79,12 +98,12 @@ private:
   VkPipeline m_pipeline;
   VkPipelineLayout m_layout;
 
-  VkBuffer m_A, m_B, m_sum;
+  VkBuffer m_data, m_output;
  
   void CreateInstance();
   void CreateDevice(uint32_t a_deviceId);
 
-  void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeline a_pipeline);
+  void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeline a_pipeline, int workgroups);
 
   void SetupSimplePipeline();
   void CreateComputePipeline();

@@ -77,36 +77,33 @@ void SimpleCompute::SetupSimplePipeline()
   };
 
   // Создание и аллокация буферов
-  m_A = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+  m_data = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-  m_B = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-  m_sum = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+  m_output = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-  vk_utils::allocateAndBindWithPadding(m_device, m_physicalDevice, {m_A, m_B, m_sum}, 0);
+  vk_utils::allocateAndBindWithPadding(m_device, m_physicalDevice, {m_data, m_output}, 0);
 
   m_pBindings = std::make_shared<vk_utils::DescriptorMaker>(m_device, dtypes, 1);
 
   // Создание descriptor set для передачи буферов в шейдер
   m_pBindings->BindBegin(VK_SHADER_STAGE_COMPUTE_BIT);
-  m_pBindings->BindBuffer(0, m_A);
-  m_pBindings->BindBuffer(1, m_B);
-  m_pBindings->BindBuffer(2, m_sum);
+  m_pBindings->BindBuffer(0, m_data);
+  m_pBindings->BindBuffer(1, m_output);
   m_pBindings->BindEnd(&m_sumDS, &m_sumDSLayout);
 
   // Заполнение буферов
-  std::vector<float> values(m_length);
-  for (uint32_t i = 0; i < values.size(); ++i) {
-    values[i] = (float)i;
-  }
-  m_pCopyHelper->UpdateBuffer(m_A, 0, values.data(), sizeof(float) * values.size());
-  for (uint32_t i = 0; i < values.size(); ++i) {
-    values[i] = (float)i * i;
-  }
-  m_pCopyHelper->UpdateBuffer(m_B, 0, values.data(), sizeof(float) * values.size());
+  // std::vector<float> values(m_length);
+  // for (uint32_t i = 0; i < values.size(); ++i) {
+  //   values[i] = (float)i;
+  // }
+  // m_pCopyHelper->UpdateBuffer(m_data, 0, values.data(), sizeof(float) * values.size());
+  // for (uint32_t i = 0; i < values.size(); ++i) {
+  //   values[i] = (float)i * i;
+  // }
+  // m_pCopyHelper->UpdateBuffer(m_output, 0, values.data(), sizeof(float) * values.size());
 }
 
-void SimpleCompute::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeline)
+void SimpleCompute::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeline, int workgroups)
 {
   vkResetCommandBuffer(a_cmdBuff, 0);
 
@@ -122,7 +119,7 @@ void SimpleCompute::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeli
 
   vkCmdPushConstants(a_cmdBuff, m_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(m_length), &m_length);
 
-  vkCmdDispatch(a_cmdBuff, 1, 1, 1);
+  vkCmdDispatch(a_cmdBuff, workgroups, 1, 1);
 
   VK_CHECK_RESULT(vkEndCommandBuffer(a_cmdBuff));
 }
@@ -135,9 +132,8 @@ void SimpleCompute::CleanupPipeline()
     vkFreeCommandBuffers(m_device, m_commandPool, 1, &m_cmdBufferCompute);
   }
 
-  vkDestroyBuffer(m_device, m_A, nullptr);
-  vkDestroyBuffer(m_device, m_B, nullptr);
-  vkDestroyBuffer(m_device, m_sum, nullptr);
+  vkDestroyBuffer(m_device, m_data, nullptr);
+  vkDestroyBuffer(m_device, m_output, nullptr);
 
   vkDestroyPipelineLayout(m_device, m_layout, nullptr);
   vkDestroyPipeline(m_device, m_pipeline, nullptr);
@@ -200,13 +196,16 @@ void SimpleCompute::CreateComputePipeline()
 }
 
 
-void SimpleCompute::Execute()
+void SimpleCompute::Setup(int workgroups)
 {
   SetupSimplePipeline();
   CreateComputePipeline();
+  BuildCommandBufferSimple(m_cmdBufferCompute, nullptr, workgroups);
+}
 
-  BuildCommandBufferSimple(m_cmdBufferCompute, nullptr);
 
+void SimpleCompute::Execute()
+{
   VkSubmitInfo submitInfo = {};
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
@@ -223,9 +222,9 @@ void SimpleCompute::Execute()
   //Ждём конца выполнения команд
   VK_CHECK_RESULT(vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, 100000000000));
 
-  std::vector<float> values(m_length);
-  m_pCopyHelper->ReadBuffer(m_sum, 0, values.data(), sizeof(float) * values.size());
-  for (auto v: values) {
-    std::cout << v << ' ';
-  }
+  // std::vector<float> values(m_length);
+  // m_pCopyHelper->ReadBuffer(m_output, 0, values.data(), sizeof(float) * values.size());
+  // for (auto v: values) {
+  //   std::cout << v << ' ';
+  // }
 }
