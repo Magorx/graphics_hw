@@ -14,8 +14,6 @@
 class SimpleCompute : public ICompute
 {
 public:
-  const int WORKGROUPS = 256;
-
   SimpleCompute(uint32_t a_length);
   ~SimpleCompute()  { Cleanup(); };
 
@@ -28,15 +26,16 @@ public:
   inline void FillData(const std::vector<float> &data)
   {
     m_pCopyHelper->UpdateBuffer(m_data, 0, data.data(), sizeof(float) * data.size());
+    m_pCopyHelper->UpdateBuffer(m_output, 0, data.data(), sizeof(float) * data.size());
   }
 
   inline float GetResults() {
-    std::vector<float> output(WORKGROUPS);
+    std::vector<float> output(m_length);
     m_pCopyHelper->ReadBuffer(m_output, 0, output.data(), sizeof(float) * output.size());
 
     float ret = 0;
-    for (float partial_sum : output) {
-      ret += partial_sum;
+    for (auto x : output) {
+      ret += x;
     }
     return ret;
   }

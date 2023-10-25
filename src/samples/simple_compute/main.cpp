@@ -10,20 +10,38 @@ auto timer_report(const Timestamp from, const Timestamp to) {
   return duration.count();
 }
 
-float computeOnGpu(std::shared_ptr<SimpleCompute> &app) {
+void smoothing_cpu(const std::vector<float> &source, std::vector<float> &output)
+{
+  constexpr size_t KERNEL_SIZE = 7;
+  constexpr size_t KERNEL_TO_LEFT = KERNEL_SIZE / 2;
+  constexpr size_t KERNEL_TO_RIGHT = KERNEL_SIZE - KERNEL_TO_LEFT - 1;
+
+  for (size_t i = 0; i < source.size(); ++i) {
+    size_t left = i < KERNEL_TO_LEFT ? 0 : i - KERNEL_TO_LEFT;
+    size_t right = i + KERNEL_TO_RIGHT >= source.size() ? source.size() - 1 : i + KERNEL_TO_RIGHT;
+
+    float window_sum = 0;
+    for (size_t j = left; j <= right; ++j) {
+      window_sum += source[j];
+    }
+
+    output[i] -= window_sum / KERNEL_SIZE;
+  }
+}
+
+void smoothing_gpu(std::shared_ptr<SimpleCompute> &app) {
   app->Execute();
-  return app->GetResults();
 }
 
 int main()
 {
   srand (static_cast <unsigned> (time(0)));
 
-  constexpr int LENGTH = 10000;
+  constexpr int LENGTH = 500000000; // больше не влезает
   constexpr int WGSIZE = 256;
-  constexpr int VULKAN_DEVICE_ID = 0;
+  constexpr int WGCOUNT = LENGTH / WGSIZE + 1;
 
-  constexpr int WGCOUNT = LENGTH / WGSIZE + static_cast<bool>(LENGTH % WGSIZE);
+  constexpr int VULKAN_DEVICE_ID = 0;
   
   std::shared_ptr<SimpleCompute> app = std::make_unique<SimpleCompute>(LENGTH);
   if(app == nullptr)
@@ -36,36 +54,45 @@ int main()
 
   std::vector<float> data(LENGTH);
   for (size_t i = 0; i < data.size(); ++i) {
-    data[i] = randfloat();
+    data[i] = randfloat() + 1.0;
   }
+  std::vector<float> cpu_output = data;
 
   // CPU
   std::cout << "CPU execution...\n";
+
   auto  cpu_start  = std::chrono::high_resolution_clock::now();
-  float cpu_result = computeOnCpu(data);
+  smoothing_cpu(data, cpu_output);
   auto  cpu_finish = std::chrono::high_resolution_clock::now();
   std::cout << "Finished, time elapsed: " << timer_report(cpu_start, cpu_finish) << "ms" << '\n';
+
+  float cpu_result = 0;
+  for (auto x : cpu_output) {
+    cpu_result += x;
+  }
   std::cout << "Result: " << cpu_result << '\n';
 
   // GPU
+  std::cout << "GPU execution...\n";
   app->Setup(WGCOUNT);
-  // app->FillData(data);
+  app->FillData(data);
 
-  // std::cout << "GPU execution...\n";
-  // auto  gpu_start  = std::chrono::high_resolution_clock::now();
-  // float gpu_result = computeOnGpu(app);
-  // auto  gpu_finish = std::chrono::high_resolution_clock::now();
-  // std::cout << "Finished, time elapsed: " << timer_report(gpu_start, gpu_finish) << "ms" << '\n';
-  // std::cout << "Result: " << gpu_result << '\n';
+  auto  gpu_start  = std::chrono::high_resolution_clock::now();
+  smoothing_gpu(app);
+  auto  gpu_finish = std::chrono::high_resolution_clock::now();
+  std::cout << "Finished, time elapsed: " << timer_report(gpu_start, gpu_finish) << "ms" << '\n';
 
-  // // Results
-  // if (abs(cpu_result - gpu_result) > 0.0001) {
-  //   std::cout << "Results are not equal!\n";
-  //   std::cout << "CPU result: " << cpu_result << "\n";
-  //   std::cout << "GPU result: " << gpu_result << "\n";
-  // } else {
-  //   std::cout << "Results are equal: " << cpu_result << "\n";
-  // }
+  float gpu_result = app->GetResults();
+  std::cout << "Result: " << gpu_result << '\n';
+
+  // Results
+  if (abs(cpu_result - gpu_result) > 0.0001) {
+    std::cout << "Results are not equal!\n";
+    // Это нормальная ситуация при нашем количестве обьектов
+  } else {
+    std::cout << "Results are equal: " << cpu_result << "\n";
+    // А вот это не нормальная
+  }
 
   return 0;
 }
