@@ -24,6 +24,8 @@ void initVulkanGLFW(std::shared_ptr<IRender> &app, GLFWwindow* window)
   }
 }
 
+#include <iostream>
+
 int main()
 {
   constexpr int WIDTH = 1024;

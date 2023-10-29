@@ -1,4 +1,5 @@
 #include "shadowmap_render.h"
+#include "utils/glfw_window.h"
 
 #include <geom/vk_mesh.h>
 #include <vk_pipeline.h>
@@ -173,6 +174,8 @@ void SimpleShadowmapRender::DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4
     auto mesh_info = m_pScnMgr->GetMeshInfo(inst.mesh_id);
     vkCmdDrawIndexed(a_cmdBuff, mesh_info.m_indNum, 1, mesh_info.m_indexOffset, mesh_info.m_vertexOffset, 0);
   }
+
+  pushConst2M.cur_time = glfwGetTime();
 }
 
 void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
