@@ -39,7 +39,7 @@ int main()
 {
   srand (static_cast <unsigned> (time(0)));
 
-  constexpr int LENGTH = 500000000; // больше не влезает
+  constexpr int LENGTH = 50000000; // больше не влезает
   constexpr int WGSIZE = 256;
   constexpr int WGCOUNT = LENGTH / WGSIZE + 1;
 
