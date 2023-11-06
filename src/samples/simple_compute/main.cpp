@@ -1,5 +1,7 @@
 #include "simple_compute.h"
 
+#include <chrono>
+
 float randfloat() {
   return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 }
