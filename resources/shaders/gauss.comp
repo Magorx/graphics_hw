@@ -1,0 +1,74 @@
+#version 450
+
+#define WG_SIZE 16
+#define WINDOW_SIZE 11
+#define WSIZE_HALF 5
+
+layout(local_size_x = WG_SIZE, local_size_y = WG_SIZE) in;
+
+layout (rgba32f, binding = 0) uniform image2D srcImage;
+layout (rgba32f, binding = 1) uniform image2D dstImage;
+layout (std140, binding = 2) uniform Gauss {
+    float coeffs[WINDOW_SIZE];
+} gauss;
+
+#define CACHE_SIZE WG_SIZE + WSIZE_HALF * 2
+
+shared vec4 image_cache[CACHE_SIZE][CACHE_SIZE];
+
+void main()
+{
+    ivec2 glob_xy = ivec2(gl_GlobalInvocationID.xy);
+    if (glob_xy.x >= imageSize(srcImage).x && glob_xy.y >= imageSize(srcImage).y) return;
+    
+    ivec2 loc_xy = ivec2(gl_LocalInvocationID.xy);
+
+    const ivec2 ws_half = ivec2(WSIZE_HALF, WSIZE_HALF);
+    const ivec2 cache_size = ivec2(CACHE_SIZE, CACHE_SIZE);
+
+    // load just your pixel
+    ivec2 begin = loc_xy + ws_half;
+    ivec2 end = loc_xy + ws_half + 1;
+
+    // and the rest, if you are the edge one
+    if (loc_xy.x == 0) {
+        begin.x = 0;
+    }
+    if (loc_xy.y == 0) {
+        begin.y = 0;
+    }
+    if (loc_xy.x == WG_SIZE - 1) {
+        end.x = CACHE_SIZE;
+    }
+    if (loc_xy.y == WG_SIZE - 1) {
+        end.y = CACHE_SIZE;
+    }
+
+    // loading...
+    for (int x = begin.x; x < end.x; ++x) {
+        for (int y = begin.y; y < end.y; ++y) {
+            image_cache[x][y] = imageLoad(srcImage, glob_xy - loc_xy + ivec2(x, y));
+        }
+    }
+
+    barrier();
+
+    // horizontal
+    vec4 color = vec4(0.0);
+    for (int index = 0; index < WINDOW_SIZE; ++index) {
+        color += image_cache[loc_xy.x + WSIZE_HALF][loc_xy.y + index] * gauss.coeffs[index];
+    }
+    barrier();
+
+    image_cache[loc_xy.x + WSIZE_HALF][loc_xy.y + WSIZE_HALF] = color;
+    barrier();
+
+    // vertical
+    color = vec4(0.0);
+    for (int index = 0; index < WINDOW_SIZE; ++index) {
+        color += image_cache[loc_xy.x + index][loc_xy.y + WSIZE_HALF] * gauss.coeffs[index];
+    }
+    barrier();
+
+    imageStore(dstImage, glob_xy, color);
+}

@@ -10,6 +10,8 @@
 #include <etna/RenderTargetStates.hpp>
 #include <vulkan/vulkan_core.h>
 
+#include <cmath>
+
 
 /// RESOURCE ALLOCATION
 
@@ -36,11 +38,52 @@ void SimpleShadowmapRender::AllocateResources()
   {
     .size = sizeof(UniformParams),
     .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
     .name = "constants"
   });
 
   m_uboMappedMem = constants.map();
+
+  srcImage = m_context->createImage(
+    etna::Image::CreateInfo {
+      .extent = vk::Extent3D{ m_width, m_height, 1 },
+      .name = "src_image",
+      .format = static_cast<vk::Format>(m_swapchain.GetFormat()),
+      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
+    }
+  );
+
+  dstImageBlurred = m_context->createImage(
+    etna::Image::CreateInfo{
+     .extent = vk::Extent3D{ m_width, m_height, 1 },
+     .name = "main_view",
+     .format = static_cast<vk::Format>(m_swapchain.GetFormat()),
+     .imageUsage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
+    }
+  );
+
+  gaussianCoeffs = m_context->createBuffer(
+    etna::Buffer::CreateInfo {
+      .size = WG_SIZE * WINDOW_SIZE,
+      .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
+      .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+      .name = "gaussian_coeffs"
+    }
+  );
+
+  float* mappedBlurCoeff = (float*) gaussianCoeffs.map();
+
+  const float disp = 2 * 2;
+
+  for (size_t i = 0; i < WINDOW_SIZE; ++i) {
+    float x = 5.f - (float) i;
+    float coeff = 1
+      * 1.f / sqrtf(2.0f * M_PI * disp)
+      * expf(-1.0f / (2.0f * disp) * x * x)
+    ;
+
+    mappedBlurCoeff[i * (WG_SIZE / sizeof(float))] = coeff;
+  }
 }
 
 void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matrices)
@@ -63,10 +106,13 @@ void SimpleShadowmapRender::DeallocateResources()
 {
   mainViewDepth.reset(); // TODO: Make an etna method to reset all the resources
   shadowMap.reset();
+  srcImage.reset();
+  dstImageBlurred.reset();
   m_swapchain.Cleanup();
   vkDestroySurfaceKHR(GetVkInstance(), m_surface, nullptr);  
 
   constants = etna::Buffer();
+  gaussianCoeffs = etna::Buffer();
 }
 
 
@@ -99,6 +145,7 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("gauss", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/gauss.comp.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -140,6 +187,8 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
+
+  m_gaussianBlurPipeline = pipelineManager.createComputePipeline("gauss", {});
 }
 
 void SimpleShadowmapRender::DestroyPipelines()
@@ -207,7 +256,9 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     VkDescriptorSet vkSet = set.getVkSet();
 
-    etna::RenderTargetState renderTargets(a_cmdBuff, {m_width, m_height}, {{a_targetImage, a_targetImageView}}, mainViewDepth);
+    // etna::RenderTargetState renderTargets(a_cmdBuff, {m_width, m_height}, {{a_targetImage, a_targetImageView}}, mainViewDepth);
+    etna::RenderTargetState renderTargets(a_cmdBuff, {m_width, m_height}, {{srcImage.get(), srcImage.getView({})}}, mainViewDepth);
+
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
     vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -215,6 +266,103 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     DrawSceneCmd(a_cmdBuff, m_worldViewProj);
   }
+
+  etna::set_state(
+    a_cmdBuff,
+    srcImage.get(),
+    vk::PipelineStageFlagBits2::eComputeShader,
+    vk::AccessFlagBits2::eShaderRead,
+    vk::ImageLayout::eGeneral,
+    vk::ImageAspectFlagBits::eColor
+  );
+
+  etna::set_state(
+    a_cmdBuff,
+    dstImageBlurred.get(),
+    vk::PipelineStageFlagBits2::eComputeShader,
+    vk::AccessFlagBits2::eShaderWrite,
+    vk::ImageLayout::eGeneral,
+    vk::ImageAspectFlagBits::eColor
+  );
+
+  // blur
+
+  {
+    auto gauss = etna::get_shader_program("gauss");
+    auto set = etna::create_descriptor_set(
+      gauss.getDescriptorLayoutId(0),
+      a_cmdBuff,
+      {
+       etna::Binding{ 0, srcImage.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral) },
+       etna::Binding{ 1, dstImageBlurred.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral) },
+       etna::Binding{ 2, gaussianCoeffs.genBinding() }
+      }
+    );
+
+    etna::flush_barriers(a_cmdBuff);
+
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    vkCmdBindPipeline(
+      a_cmdBuff,
+      VK_PIPELINE_BIND_POINT_COMPUTE,
+      m_gaussianBlurPipeline.getVkPipeline()
+    );
+    vkCmdBindDescriptorSets(
+      a_cmdBuff,
+      VK_PIPELINE_BIND_POINT_COMPUTE,
+      m_gaussianBlurPipeline.getVkPipelineLayout(),
+      0, 1, &vkSet, 0,
+      VK_NULL_HANDLE
+    );
+
+    vkCmdDispatch(a_cmdBuff, (m_width + 15) / 16, (m_height + 15) / 16, 1);
+    etna::flush_barriers(a_cmdBuff);
+  }
+
+  etna::set_state(a_cmdBuff, srcImage.get(),
+    vk::PipelineStageFlagBits2::eComputeShader,
+    vk::AccessFlagBits2::eShaderRead,
+    vk::ImageLayout::eGeneral,
+    vk::ImageAspectFlagBits::eColor
+  );
+
+  etna::set_state(
+    a_cmdBuff,
+    dstImageBlurred.get(),
+    vk::PipelineStageFlagBits2::eBlit,
+    vk::AccessFlagBits2::eTransferRead,
+    vk::ImageLayout::eTransferSrcOptimal,
+    vk::ImageAspectFlagBits::eColor
+  );
+
+  etna::set_state(
+    a_cmdBuff,
+    a_targetImage,
+    vk::PipelineStageFlagBits2::eBlit,
+    vk::AccessFlagBits2::eTransferWrite,
+    vk::ImageLayout::eTransferDstOptimal,
+    vk::ImageAspectFlagBits::eColor
+  );
+
+  etna::flush_barriers(a_cmdBuff);
+
+  VkImageBlit region{};
+  region.srcOffsets[0] = { 0, 0, 0 };
+  region.srcOffsets[1] = { (int)m_width, (int)m_height, 1 };
+  region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.srcSubresource.mipLevel = 0;
+  region.srcSubresource.baseArrayLayer = 0;
+  region.srcSubresource.layerCount = 1;
+  region.dstOffsets[0] = { 0, 0, 0 };
+  region.dstOffsets[1] = { (int)m_width, (int)m_height, 1 };
+  region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.dstSubresource.mipLevel = 0;
+  region.dstSubresource.baseArrayLayer = 0;
+  region.dstSubresource.layerCount = 1;
+  vkCmdBlitImage(a_cmdBuff, dstImageBlurred.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, a_targetImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region, VK_FILTER_NEAREST);
+
+  etna::flush_barriers(a_cmdBuff);
 
   if(m_input.drawFSQuad)
   {

@@ -50,6 +50,13 @@ private:
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
+  etna::Image srcImage;
+  etna::Image dstImageBlurred;
+  etna::Buffer gaussianCoeffs;
+
+  static constexpr size_t WINDOW_SIZE = 11;
+  static constexpr size_t WG_SIZE = 16;
+
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
   struct
@@ -77,6 +84,7 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::ComputePipeline m_gaussianBlurPipeline {};
 
   std::shared_ptr<vk_utils::DescriptorMaker> m_pBindings = nullptr;
   
