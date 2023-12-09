@@ -1,6 +1,7 @@
 #include "simple_compute.h"
 
 #include <chrono>
+#include <iomanip>
 
 float randfloat() {
   return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
@@ -15,20 +16,27 @@ auto timer_report(const Timestamp from, const Timestamp to) {
 void smoothing_cpu(const std::vector<float> &source, std::vector<float> &output)
 {
   constexpr size_t KERNEL_SIZE = 7;
-  constexpr size_t KERNEL_TO_LEFT = KERNEL_SIZE / 2;
-  constexpr size_t KERNEL_TO_RIGHT = KERNEL_SIZE - KERNEL_TO_LEFT - 1;
+  constexpr size_t KERNEL_TO_LEFT = 3;
+  constexpr size_t KERNEL_TO_RIGHT = KERNEL_SIZE - KERNEL_TO_LEFT;
 
   for (size_t i = 0; i < source.size(); ++i) {
     size_t left = i < KERNEL_TO_LEFT ? 0 : i - KERNEL_TO_LEFT;
     size_t right = i + KERNEL_TO_RIGHT >= source.size() ? source.size() - 1 : i + KERNEL_TO_RIGHT;
 
-    float window_sum = 0;
+    float window_sum = 0.0f;
     for (size_t j = left; j <= right; ++j) {
       window_sum += source[j];
     }
 
-    output[i] -= window_sum / KERNEL_SIZE;
+    // output[i] = -window_sum / (float) KERNEL_SIZE;
+    // output[i] = source[i];
+    output[i] = source[i] -window_sum / (float) KERNEL_SIZE;
   }
+
+  for (size_t i = 0; i < output.size(); ++i) {
+    std::cout << output[i] << ' ';
+  }
+  std::cout << '\n';
 }
 
 void smoothing_gpu(std::shared_ptr<SimpleCompute> &app) {
@@ -37,9 +45,12 @@ void smoothing_gpu(std::shared_ptr<SimpleCompute> &app) {
 
 int main()
 {
-  srand (static_cast <unsigned> (time(0)));
+  // std::cout << time(0) << std::endl;
+  srand (static_cast <unsigned> (1702133823));
 
-  constexpr int LENGTH = 50000000; // больше не влезает
+  std::cout << std::setprecision(20);
+
+  constexpr int LENGTH = 10; // больше не влезает
   constexpr int WGSIZE = 256;
   constexpr int WGCOUNT = LENGTH / WGSIZE + 1;
 

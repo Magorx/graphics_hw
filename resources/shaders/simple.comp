@@ -22,17 +22,18 @@ void main()
     if (idx > PushConstant.len - 1) return;
 
     const int KERNEL_SIZE = 7;
-    const int KERNEL_TO_LEFT = KERNEL_SIZE / 2;
-    const int KERNEL_TO_RIGHT = KERNEL_SIZE - KERNEL_TO_LEFT - 1;
+    const int KERNEL_TO_LEFT = 3;
+    const int KERNEL_TO_RIGHT = KERNEL_SIZE - KERNEL_TO_LEFT;
     
     uint idx_from = max(0, int(idx) - KERNEL_TO_LEFT);
     uint idx_to   = min(PushConstant.len - 1, idx + KERNEL_TO_RIGHT);
 
-    float sum = .0;
+    float sum = 0.0;
     for (uint i = idx_from; i <= idx_to; i++) {
         sum += source[i];
     }
 
-    result[idx] = result[idx] - sum / KERNEL_SIZE;
-
+    // result[idx] = - sum / 7.0;
+    // result[idx] = souce[idx];
+    result[idx] = souce[idx] - sum / 7.0;
 }

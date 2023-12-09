@@ -78,9 +78,9 @@ void SimpleCompute::SetupSimplePipeline()
 
   // Создание и аллокация буферов
   m_data = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+                                                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
   m_output = vk_utils::createBuffer(m_device, sizeof(float) * m_length, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+                                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT);
   vk_utils::allocateAndBindWithPadding(m_device, m_physicalDevice, {m_data, m_output}, 0);
 
   m_pBindings = std::make_shared<vk_utils::DescriptorMaker>(m_device, dtypes, 1);
@@ -222,9 +222,9 @@ void SimpleCompute::Execute()
   //Ждём конца выполнения команд
   VK_CHECK_RESULT(vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, 100000000000));
 
-  // std::vector<float> values(m_length);
-  // m_pCopyHelper->ReadBuffer(m_output, 0, values.data(), sizeof(float) * values.size());
-  // for (auto v: values) {
-  //   std::cout << v << ' ';
-  // }
+  std::vector<float> values(m_length);
+  m_pCopyHelper->ReadBuffer(m_output, 0, values.data(), sizeof(float) * values.size());
+  for (auto v: values) {
+    std::cout << v << ' ';
+  }
 }
